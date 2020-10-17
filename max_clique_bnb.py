@@ -3,9 +3,12 @@ import argparse
 import sys
 import time
 from math import floor, ceil
+import collections
+from func_timeout import func_timeout, FunctionTimedOut, func_set_timeout
 
 from docplex.mp.model import Model
 import networkx as nx
+from networkx.algorithms import approximation
 from dataclasses import dataclass
 import numpy as np
 
@@ -43,8 +46,9 @@ class OptimizedModel(Model):
 
 
 class MaxCliqueBnB:
-    def __init__(self, G):
+    def __init__(self, G, verbose=False):
         self.G = G
+        self.verbose = verbose
         self.nodes = [v for v in G.nodes()]
 
         self.cp = OptimizedModel(name='Max clique problem')
@@ -72,31 +76,45 @@ class MaxCliqueBnB:
                         'connected_sequential_dfs', 'saturation_largest_first']
         for strategy in strategies:
             independency_dict = self.coloring(strategy)
-            ind_set_maximal = self.maximal_ind_set_colors(independency_dict)
-            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in ind_set_maximal.values() if len(set_) != 1})
+            # strategy adding constraints united by with just one color isn't help to boost
+            # alghoritm. Need to create stronger constraints.
+            extended_ind_set = self.create_larger_ind_sets(independency_dict)
+            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set.values()) if len(set_) != 1})
+            
+        # heuristic to find approximal independence set
+        ind_set_heur = approximation.maximum_independent_set(G)
+        constr.update({self.cp.sum([self.x[i] for i in ind_set_heur]) <= 1})
 
-        coloring_list = list()
-        for i in range(100):
-            coloring_list.append(self.coloring(strategy='random_sequential'))
-        coloring_list = sorted(coloring_list, key=lambda x: len(x.keys()))
-
-        for elem in coloring_list[:5]:
-            ind_set_maximal = self.maximal_ind_set_colors(elem)
-            constr |= {self.cp.sum([self.x[i] for i in x]) <= 1 for x in ind_set_maximal.values()}
+        # now we generate random independence sets proportionately to the quantity of nodes
+        # create dict with these sets
+        # apply function which extend each independent set
+        for i in range(len(self.nodes)):
+            random_color_dict = self.coloring('random_sequential')
+            extended_ind_set_2 = self.create_larger_ind_sets(random_color_dict)
+            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set_2.values())[:5] if len(set_) != 1})
 
         # Add all constraints
+        print(f'will be added {len(constr)} aditional constraints')
+        time.sleep(2)
         self.cp.add_constraints(constr)
+        if self.verbose:
+            print('_____welcome to matrix____')
+            time.sleep(2)
 
+    @func_set_timeout(7200)
     def bnb(self):
         # get float solution
         cps = self.cp.solve()
+
         # if solution isn't found - drop this branch
         if cps is None:
             return
 
+        # solve with cplex help
         x = np.array(cps.get_all_values())
         z = cps.get_objective_value()
-        print(x, z, self.f_opt)
+        if self.verbose:
+            print(x, z, self.f_opt)
 
         # if our optimal int solution is better than float solution on this branch -> stop
         if self.trunc(z) <= self.f_opt:
@@ -104,7 +122,7 @@ class MaxCliqueBnB:
 
         # if all vars are integer (and we do not reduce solution), then rewrite optimal
         # get a branch
-        i = self.branching_color(x)
+        i = self.branching(x)
         if i == -1: # if i == -1 than we have all integer vars
             if z > self.f_opt:
                 print(f'new solution: {z}')
@@ -157,6 +175,21 @@ class MaxCliqueBnB:
                 color_dict[c] = set([v])
         return color_dict
 
+    def create_larger_ind_sets(self, color_dict : dict):
+        """function to create larger independence set simply iterating
+        over dict with colors and if some vertex from different color has no edge
+        with all vertexes in curent color, we add it to set.
+        """
+        for color1 in color_dict:
+            for color2, vertexes in color_dict.items():
+                if color1 != color2:
+                    for w in vertexes:
+                        if not any(map(lambda x: self.G.has_edge(w,x), color_dict[color1])):
+                            color_dict[color1].add(w)
+        color_dict = sorted(color_dict.items(), key=lambda x: len(x[1]), reverse=True)
+        sorted_dict = collections.OrderedDict(color_dict)
+        return sorted_dict
+
     @staticmethod
     def integer_dist(x: np.array):
         ''' function to calculate L1 norm beetwen float array and 
@@ -204,30 +237,12 @@ class MaxCliqueBnB:
                                 else best_clique)
         return best_clique
 
-    def maximal_ind_set_colors(self, ind_set):
-        """Maximaze independent set
-        for each color in ind_set
-        """
-        ind_set_maximal = {i: set(v) for i, v in ind_set.items()}
-        # Choose pairs of colors
-        for i in ind_set.keys():
-            for j, color_find in ind_set.items():
-                if i != j:
-                    # Choose elem from color_new
-                    for x in color_find:
-                        # If you can add it to
-                        # this independent set
-                        if all([not self.G.has_edge(x, y) for y in ind_set_maximal[i]]):
-                            ind_set_maximal[i].add(x)
-
-        return ind_set_maximal
-
 def main():
     # parse file
     parser = argparse.ArgumentParser(description='antispoofing training')
     parser.add_argument('--file', '-f', type=str, default='DIMACS_all_ascii\C125.9.clq', help='specify path to file with graph')
+    parser.add_argument('--verbose', type=bool, default=True)
     args = parser.parse_args()
-
     # create graph
     G = nx.Graph()
     with open(args.file) as f:
@@ -238,11 +253,17 @@ def main():
     print('number_of_edges:', G.number_of_edges())
     print('number_of_nodes:', G.number_of_nodes())
 
+    bnb = MaxCliqueBnB(G, verbose=args.verbose)
     start_time = time.time()
-    bnb = MaxCliqueBnB(G)
-    bnb.bnb()
-    print(bnb.f_opt, bnb.x_opt)
-    print("--- {} seconds ---".format((time.time() - start_time)))
+    print('___start computing___')
+    try:
+        bnb.bnb()
+    except FunctionTimedOut:
+        print('Time out!')
+    finally:
+        print(bnb.f_opt, bnb.x_opt)
+        print("--- {} seconds ---".format((time.time() - start_time)))
+    
 
 if __name__ == "__main__":
     main()
