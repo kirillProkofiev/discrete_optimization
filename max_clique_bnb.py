@@ -65,8 +65,8 @@ class MaxCliqueBnB:
         self.cp.add_constraints(constr)
         self.cp.maximize(self.cp.sum(self.x))
         self.f_opt = len(self.heuristic(G))
-        print(self.f_opt)
-        self.x_opt = None
+        print(f'solution found by heuristic: {self.f_opt}')
+        self.x_opt = self.heuristic(G)
         # this is for branching
         self.d = nx.algorithms.coloring.greedy_color(self.G, strategy='independent_set')
 
@@ -91,7 +91,7 @@ class MaxCliqueBnB:
         for i in range(len(self.nodes)):
             random_color_dict = self.coloring('random_sequential')
             extended_ind_set_2 = self.create_larger_ind_sets(random_color_dict)
-            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set_2.values())[:5] if len(set_) != 1})
+            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set_2.values())[:7] if len(set_) != 1})
 
         # Add all constraints
         print(f'will be added {len(constr)} aditional constraints')
@@ -101,7 +101,7 @@ class MaxCliqueBnB:
             print('_____welcome to matrix____')
             time.sleep(2)
 
-    @func_set_timeout(7200)
+    @func_set_timeout(5)
     def bnb(self):
         # get float solution
         cps = self.cp.solve()
@@ -122,12 +122,11 @@ class MaxCliqueBnB:
 
         # if all vars are integer (and we do not reduce solution), then rewrite optimal
         # get a branch
-        i = self.branching(x)
+        i = self.branching_int(x)
         if i == -1: # if i == -1 than we have all integer vars
-            if z > self.f_opt:
-                print(f'new solution: {z}')
-                self.f_opt = z
-                self.x_opt = x
+            print(f'new solution: {z}')
+            self.f_opt = z
+            self.x_opt = x
             return
 
         # go to the left branches
@@ -142,7 +141,7 @@ class MaxCliqueBnB:
         self.bnb()
         self.cp.remove_constraint_batch(constraint_right)
 
-    def branching(self, x: np.array):
+    def branching_int(self, x: np.array):
         integer_distances = self.integer_dist(x)
         filtered_vars = integer_distances[integer_distances >= 1e-8]
         if filtered_vars.size == 0:
@@ -240,30 +239,40 @@ class MaxCliqueBnB:
 def main():
     # parse file
     parser = argparse.ArgumentParser(description='antispoofing training')
-    parser.add_argument('--file', '-f', type=str, default='DIMACS_all_ascii\C125.9.clq', help='specify path to file with graph')
+    parser.add_argument('--file', '-f', type=str, default='DIMACS_all_ascii\\c-fat500-1.clq', help='specify path to file with graph')
     parser.add_argument('--verbose', type=bool, default=True)
     args = parser.parse_args()
     # create graph
     G = nx.Graph()
-    with open(args.file) as f:
-        str_edges = [l[1:].strip().split() for l in f]
-    edges = [(int(v2),int(v1)) for v1,v2 in str_edges]
-    G.add_edges_from(edges)
+    for input_ in ['DIMACS_all_ascii\\gen200_p0.9_55.clq', 
+                    'DIMACS_all_ascii\\gen400_p0.9_55.clq',
+                    'DIMACS_all_ascii\\brock200_2.clq', 
+                    'DIMACS_all_ascii\\brock200_3.clq',
+                    'DIMACS_all_ascii\\brock200_4.clq', 
+                    'DIMACS_all_ascii\\gen400_p0.9_65.clq',
+                    'DIMACS_all_ascii\\C250_9.clq',]:
 
-    print('number_of_edges:', G.number_of_edges())
-    print('number_of_nodes:', G.number_of_nodes())
+        with open(input_) as f:
+            str_edges = [l[1:].strip().split() for l in f]
+        edges = [(int(v2),int(v1)) for v1,v2 in str_edges]
+        G.add_edges_from(edges)
 
-    bnb = MaxCliqueBnB(G, verbose=args.verbose)
-    start_time = time.time()
-    print('___start computing___')
-    try:
-        bnb.bnb()
-    except FunctionTimedOut:
-        print('Time out!')
-    finally:
-        print(bnb.f_opt, bnb.x_opt)
-        print("--- {} seconds ---".format((time.time() - start_time)))
-    
+        print('number_of_edges:', G.number_of_edges())
+        print('number_of_nodes:', G.number_of_nodes())
+
+        bnb = MaxCliqueBnB(G, verbose=False)
+        start_time = time.time()
+        print('___start computing___')
+        try:
+            bnb.bnb()
+        except FunctionTimedOut:
+            print('Time out!')
+            continue
+        finally:
+            with open('test.txt', 'a') as f:
+                str_ = (f'name: {input_}\n\nbnb.f_opt {bnb.f_opt}, bnb.x_opt {bnb.x_opt}'
+                        + f"\n--- {time.time() - start_time} seconds ---\n\n")
+                f.write(str_)
 
 if __name__ == "__main__":
     main()
