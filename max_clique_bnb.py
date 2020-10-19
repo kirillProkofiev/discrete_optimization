@@ -4,12 +4,12 @@ import sys
 import time
 from math import floor, ceil
 import collections
+import os.path as osp
 from func_timeout import func_timeout, FunctionTimedOut, func_set_timeout
 
 from docplex.mp.model import Model
 import networkx as nx
 from networkx.algorithms import approximation
-from dataclasses import dataclass
 import numpy as np
 
 
@@ -67,10 +67,10 @@ class MaxCliqueBnB:
         self.f_opt = len(self.heuristic(G))
         print(f'solution found by heuristic: {self.f_opt}')
         self.x_opt = self.heuristic(G)
-        # this is for branching
+        # this is for the color branching
         self.d = nx.algorithms.coloring.greedy_color(self.G, strategy='independent_set')
 
-        # coloring graph and the vertexes with one color will form independence set
+        # color the graph and the vertexes with one color will form an independence set
         constr = set()
         strategies = ['largest_first', 'smallest_last', 'independent_set', 'connected_sequential_bfs', 
                         'connected_sequential_dfs', 'saturation_largest_first']
@@ -85,9 +85,9 @@ class MaxCliqueBnB:
         ind_set_heur = approximation.maximum_independent_set(G)
         constr.update({self.cp.sum([self.x[i] for i in ind_set_heur]) <= 1})
 
-        # now we generate random independence sets proportionately to the quantity of nodes
-        # create dict with these sets
-        # apply function which extend each independent set
+        # now we generate random independence sets proportionately to the quantity of the nodes
+        # create a dict with these sets
+        # apply the function that extend each independent set
         for i in range(len(self.nodes)):
             random_color_dict = self.coloring('random_sequential')
             extended_ind_set_2 = self.create_larger_ind_sets(random_color_dict)
@@ -101,8 +101,9 @@ class MaxCliqueBnB:
             print('_____welcome to matrix____')
             time.sleep(2)
 
-    @func_set_timeout(5)
+    @func_set_timeout(7200)
     def bnb(self):
+        # solve with cplex help
         # get float solution
         cps = self.cp.solve()
 
@@ -116,13 +117,13 @@ class MaxCliqueBnB:
         if self.verbose:
             print(x, z, self.f_opt)
 
-        # if our optimal int solution is better than float solution on this branch -> stop
+        # if our optimal int solution is better than the float solution on this branch -> stop
         if self.trunc(z) <= self.f_opt:
             return
 
-        # if all vars are integer (and we do not reduce solution), then rewrite optimal
         # get a branch
         i = self.branching_int(x)
+        # if all vars are integer (and we do not reduce solution), then rewrite the optimal
         if i == -1: # if i == -1 than we have all integer vars
             print(f'new solution: {z}')
             self.f_opt = z
@@ -142,6 +143,7 @@ class MaxCliqueBnB:
         self.cp.remove_constraint_batch(constraint_right)
 
     def branching_int(self, x: np.array):
+        '''function to return vertex with the most small distance to the integer'''
         integer_distances = self.integer_dist(x)
         filtered_vars = integer_distances[integer_distances >= 1e-8]
         if filtered_vars.size == 0:
@@ -164,6 +166,7 @@ class MaxCliqueBnB:
         return -1
 
     def coloring(self, strategy):
+        ''' color the graph and return reversed dict for computational convenience'''
         colors = nx.algorithms.coloring.greedy_color(self.G, strategy=strategy)
         # reverse dict
         color_dict = dict()
@@ -176,8 +179,8 @@ class MaxCliqueBnB:
 
     def create_larger_ind_sets(self, color_dict : dict):
         """function to create larger independence set simply iterating
-        over dict with colors and if some vertex from different color has no edge
-        with all vertexes in curent color, we add it to set.
+        over a dict with colors and if some vertex from different color has no edge
+        with all vertexes in the curent color, we add it to the set.
         """
         for color1 in color_dict:
             for color2, vertexes in color_dict.items():
@@ -191,7 +194,7 @@ class MaxCliqueBnB:
 
     @staticmethod
     def integer_dist(x: np.array):
-        ''' function to calculate L1 norm beetwen float array and 
+        ''' function to calculate L1 norm between float array and 
         its integer projection '''
         round_func = np.vectorize(round)
         abs_func = np.vectorize(abs)
@@ -238,20 +241,19 @@ class MaxCliqueBnB:
 
 def main():
     # parse file
-    parser = argparse.ArgumentParser(description='antispoofing training')
-    parser.add_argument('--file', '-f', type=str, default='DIMACS_all_ascii\\c-fat500-1.clq', help='specify path to file with graph')
-    parser.add_argument('--verbose', type=bool, default=True)
+    parser = argparse.ArgumentParser(description='max clique problem')
+    parser.add_argument('--files_list', '-fl', type=str, default=['C125.9.clq'], nargs='*', 
+                        help='specify graphs that do you want to compute')
+    parser.add_argument('--folder','-fol', type=str, default='DIMACS_all_ascii', 
+                        help='path to the folder where graphs placed')
+    parser.add_argument('--verbose', type=bool, default=False)
     args = parser.parse_args()
-    # create graph
-    G = nx.Graph()
-    for input_ in ['DIMACS_all_ascii\\gen200_p0.9_55.clq', 
-                    'DIMACS_all_ascii\\gen400_p0.9_55.clq',
-                    'DIMACS_all_ascii\\brock200_2.clq', 
-                    'DIMACS_all_ascii\\brock200_3.clq',
-                    'DIMACS_all_ascii\\brock200_4.clq', 
-                    'DIMACS_all_ascii\\gen400_p0.9_65.clq',
-                    'DIMACS_all_ascii\\C250_9.clq',]:
 
+    inputs_ = [osp.join(args.folder, x) for x in args.files_list]
+    # create graph
+    for input_ in inputs_:
+
+        G = nx.Graph()
         with open(input_) as f:
             str_edges = [l[1:].strip().split() for l in f]
         edges = [(int(v2),int(v1)) for v1,v2 in str_edges]
@@ -262,11 +264,11 @@ def main():
 
         bnb = MaxCliqueBnB(G, verbose=False)
         start_time = time.time()
-        print('___start computing___')
+        print('--------------start computing--------------')
         try:
             bnb.bnb()
         except FunctionTimedOut:
-            print('Time out!')
+            print('Watch out! Time out!')
             continue
         finally:
             with open('test.txt', 'a') as f:
