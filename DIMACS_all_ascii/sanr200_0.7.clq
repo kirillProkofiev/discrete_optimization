@@ -1,18 +1,3 @@
-c File:  sanr200_0.7.clq
-c
-c SOURCE: Laura Sanchis (laura@cs.colgate.edu)
-c
-c DESCRIPTION:  Randomly generated graph of similar size to "san"
-c               graphs, but with differenct clique characteristics
-c
-c REFERENCE: "Test Case Construction for the Vertex Cover Problem", 
-c DIMACS Workshop on Computational Support for Discrete Mathematics, 
-c March, 1992, with additional work in a to be published technical
-c report.
-c
-c random graph 200 vertices 13868 edges
-c 200 0.300000 3769
-p edge 200 13868
 e 2 1
 e 3 1
 e 3 2

@@ -74,13 +74,14 @@ class MaxCliqueBnB:
         constr = set()
         strategies = ['largest_first', 'smallest_last', 'independent_set', 'connected_sequential_bfs', 
                         'connected_sequential_dfs', 'saturation_largest_first']
-        for strategy in strategies:
-            independency_dict = self.coloring(strategy)
-            # strategy adding constraints united by with just one color isn't help to boost
-            # alghoritm. Need to create stronger constraints.
-            extended_ind_set = self.create_larger_ind_sets(independency_dict)
-            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set.values()) if len(set_) != 1})
-            
+        for i in range(10):
+            for strategy in strategies:
+                independency_dict = self.coloring(strategy)
+                # strategy adding constraints united by with just one color isn't help to boost
+                # alghoritm. Need to create stronger constraints.
+                extended_ind_set = self.create_larger_ind_sets(independency_dict)
+                constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set.values()) if len(set_) != 1})
+                
         # heuristic to find approximal independence set
         ind_set_heur = approximation.maximum_independent_set(G)
         constr.update({self.cp.sum([self.x[i] for i in ind_set_heur]) <= 1})
@@ -88,10 +89,10 @@ class MaxCliqueBnB:
         # now we generate random independence sets proportionately to the quantity of the nodes
         # create a dict with these sets
         # apply the function that extend each independent set
-        for i in range(len(self.nodes)):
+        for i in range(len(self.nodes)*10):
             random_color_dict = self.coloring('random_sequential')
             extended_ind_set_2 = self.create_larger_ind_sets(random_color_dict)
-            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set_2.values())[:7] if len(set_) != 1})
+            constr.update({self.cp.sum([self.x[i] for i in set_]) <= 1 for set_ in list(extended_ind_set_2.values())[:3] if len(set_) != 1})
 
         # Add all constraints
         print(f'will be added {len(constr)} aditional constraints')
@@ -262,7 +263,7 @@ def main():
         print('number_of_edges:', G.number_of_edges())
         print('number_of_nodes:', G.number_of_nodes())
 
-        bnb = MaxCliqueBnB(G, verbose=False)
+        bnb = MaxCliqueBnB(G, verbose=args.verbose)
         start_time = time.time()
         print('--------------start computing--------------')
         try:
