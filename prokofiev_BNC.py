@@ -32,7 +32,7 @@ class MaxCliqueBnC:
 
         self.cp.add_constraints(constr)
         self.cp.maximize(self.cp.sum(self.x))
-        self.x_opt = self.random_heuristic(G)
+        self.x_opt = self.heuristic(G)
         self.f_opt = len(self.x_opt)
         print(f'solution found by heuristic: {self.f_opt}')
 
@@ -71,14 +71,15 @@ class MaxCliqueBnC:
         # if our optimal int solution is better than the float solution on this branch -> stop
         if self.trunc(z) <= self.f_opt:
             return
-        
-        sep_constr = []
-        for _ in range(10):
-            C = self.separation(x)
-            if C:
-                sep_constr.append(C)
 
-        while sep_constr:
+        while True:
+            sep_constr = []
+            for _ in range(10):
+                C = self.separation(x)
+                if C:
+                    sep_constr.append(C)
+            if not sep_constr:
+                break
             for set_cons in sep_constr:
                 self.cp.add_constraint_batch(self.cp.sum([self.x[i] for i in set_cons]) <= 1)
             cps2 = self.cp.solve()
@@ -88,28 +89,14 @@ class MaxCliqueBnC:
             z2 = cps2.get_objective_value()
             if self.trunc(z2) <= self.f_opt:
                 return
-            if z2 - z < 1e-3:
+            if z2 - z < 1e-3: # if changes too small
                 break
             z = z2
             x = x2
-            sep_constr = []
-            for _ in range(10):
-                C = self.separation(x)
-                if C:
-                    sep_constr.append(C)
 
         # whitening constraints. Delete non-binding constraints
         if self.cp.number_of_constraints > 2000:
-            print(f"delete non-binding constraints from {self.cp.number_of_constraints}")
-            # Choose random indexes to drop
-            # Do not drop first N constraints which is x_i < 1
-            constr = [self.cp.get_constraint_by_index(id) for id in
-                      np.arange(len(self.nodes), self.cp.number_of_constraints)]
-
-            constr = [x for x in constr if x is not None and 1 < x.lhs.size()]
-            constr = sorted(constr, key=lambda x: x.slack_value, reverse=True)[:np.int(np.round(len(constr) / 1.5))]
-            self.cp.remove_constraints(constr)
-            print("Now model has ", self.cp.number_of_constraints, "constraints")
+            self.delete_non_bidings()
 
         # get a branch
         i = self.branching_int(x)
@@ -128,6 +115,7 @@ class MaxCliqueBnC:
                 self.x_opt = x
                 return
 
+        # choose closer branch
         seq_br = [0,1] if x[i] < 0.5 else [1,0]
         for b in seq_br:
             # go to the branch
@@ -151,7 +139,7 @@ class MaxCliqueBnC:
         return i
     
     def branching_color(self, x: np.array):
-        ''' func to return vertex with largest color for branching '''
+        ''' function to return vertex with largest color for branching '''
         # run through reversive sorted dict of the colors
         for v, _ in sorted(self.d.items(), key=lambda x: x[1], reverse=True):
             # if our vertex is not integer then return branch with
@@ -172,6 +160,20 @@ class MaxCliqueBnC:
                 color_dict[c] = set([v])
         return color_dict
 
+    def delete_non_bidings(self):
+        ''' function to delete non-bindings constraints from the model'''
+        # whitening constraints. Delete non-binding constraints
+        num_of_constr = self.cp.number_of_constraints
+        # get all constraints from the model except first one for vertexes
+        all_constraints = [self.cp.get_constraint_by_index(i) for i in
+                           range(len(self.nodes), num_of_constr)]
+        # filter it by size
+        filtered_constr = [x for x in all_constraints if ((x is not None) and (x.lhs.size() > 1))]
+        # sort by slack value and delete 2/3 of them
+        constr_to_del = sorted(filtered_constr, key=lambda x: x.slack_value, reverse=True)[:int(len(filtered_constr) / 1.5)]
+        self.cp.remove_constraints(constr_to_del)
+        print(f"delete non-binding constraints from {num_of_constr} --> {self.cp.number_of_constraints}")
+    
     def create_larger_ind_sets(self, color_dict : dict):
         """function to create larger independence set simply iterating
         over a dict with colors and if some vertex from different color has no edge
@@ -235,7 +237,7 @@ class MaxCliqueBnC:
         return best_clique
     
     def random_heuristic(self, G):
-        ''' fast heuristic with largest degrees '''
+        ''' slow but better random heuristic '''
         best_clique = set()
         for _ in range(300):
             for v in self.G.nodes():
@@ -264,20 +266,20 @@ class MaxCliqueBnC:
 
     def stupid_separation(self, x):
         # color graph to get independent set
-        colors = self.coloring(strategy = 'independent_set')
+        colors = self.coloring(strategy = 'random_sequential')
         # extend it
         color_dict = self.create_larger_ind_sets(colors)
         max_weighted_set = self.get_max_weighted_ind_set(color_dict, x)
-        if max_weighted_set:
-            constr = {self.x[v] for v in max_weighted_set}
-            return constr
-        return
+        return max_weighted_set
     
     def separation(self, x):
+        ''' gridy separation based on coloring'''
         solution = set()
         weighted_sum = 0
         colors = nx.algorithms.coloring.greedy_color(self.G, strategy='random_sequential')
+        # devide weights by the color to get smart weights 
         weights = [w / (colors[self.nodes[i]] + 1e-4) for i, w in enumerate(x) ]
+        # create prioritized queue
         q = PrioritizedQueue()
         q.heappify([[-w, self.nodes[i]] for i, w in enumerate(weights)])
         next_v = q.pop()
@@ -292,6 +294,7 @@ class MaxCliqueBnC:
 
     @staticmethod
     def get_max_weighted_ind_set(color_dict, weights):
+        ''' find max weighted independent set '''
         max_sum = 0
         max_weighted_set = None
         for value in color_dict.values():
