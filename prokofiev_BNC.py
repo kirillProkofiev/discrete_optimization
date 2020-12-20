@@ -1,4 +1,4 @@
-''' This is BnB implementation using heuristic with vertexes degrees, coloring graph and usin Cplex optimization with batch constraints'''
+''' This is BnC implementation using heuristic with random vertexes choise or max degree, coloring graph and using Cplex optimization with batch constraints'''
 import argparse
 import sys
 import time

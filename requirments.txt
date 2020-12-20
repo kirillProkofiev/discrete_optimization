@@ -3,3 +3,4 @@ networkx==2.5
 func-timeout==4.3.5
 cplex==12.10.0.0
 docplex==2.11.176
+dwave-networkx==0.8.8

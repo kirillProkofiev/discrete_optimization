@@ -46,32 +46,37 @@ class PrioritizedQueue:
 
 
 class OptimizedModel(Model):
-    """Modified docplex.mp.model.Model
-    The idea applied from oficial cplex repo"""
+    """Modified docplex.mp.model.Model"""
 
-    def __init__(self, name):
+    def __init__(self, name=None):
+        """Remember constraints and
+        apply in in the model only ones
+        """
         super().__init__(name=name)
-        self._batch_add_constr = []
-        self._batch_remove_constr = []
+        self._bath_add_constr = []
+        self._bath_remove_constr = []
 
-    def add_constraint_batch(self, constr):
-        """Add constraints to batch"""
-        self._batch_add_constr.append(constr)
+    def add_constraint_bath(self, constr):
+        """Add constraints to bath"""
+        self._bath_add_constr.append(constr)
         return constr
 
-    def remove_constraint_batch(self, constr):
-        """Remove constraints from batch"""
-        self._batch_remove_constr.append(constr)
+    def remove_constraint_bath(self, constr):
+        """Remove constraints from bath"""
+        self._bath_remove_constr.append(constr)
+
+    def apply_batch(self):
+        """Apply all batched constraints"""
+        if self._bath_add_constr:
+            super().add_constraints(self._bath_add_constr)
+            self._bath_add_constr = []
+
+        if self._bath_remove_constr:
+            super().remove_constraints(self._bath_remove_constr)
+            self._bath_remove_constr = []
 
     def solve(self):
-        """Solve model adding all batched
+        """Solve model adding all bathed
         constraints before computing"""
-        if self._batch_add_constr:
-            super().add_constraints(self._batch_add_constr)
-            self._batch_add_constr = []
-
-        if self._batch_remove_constr:
-            super().remove_constraints(self._batch_remove_constr)
-            self._batch_remove_constr = []
-
+        self.apply_batch()
         return super().solve()
